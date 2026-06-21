@@ -124,6 +124,7 @@ impl Database {
             ("autostart", "true"),
             ("scheduler_interval_secs", "30"),
             ("notification_sound_path", ""),
+            ("notify_before_minutes", "2"),
             ("theme", "light"),
             ("transcription_provider", "whisper"),
         ];
@@ -177,7 +178,7 @@ impl Database {
             "SELECT id, title, description, original_text, due_at, status, created_at, updated_at,
                     notified_at, completed_at, cancelled_at, snooze_count, last_snoozed_at,
                     parsed_time_expression, source
-             FROM reminders WHERE status = 'pending' ORDER BY due_at ASC"
+             FROM reminders WHERE status IN ('pending', 'notified') ORDER BY due_at ASC"
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(Reminder {

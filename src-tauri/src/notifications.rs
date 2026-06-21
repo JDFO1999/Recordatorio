@@ -8,6 +8,8 @@ fn is_file_path(path: &str) -> bool {
 }
 
 fn play_sound_file(path: &str) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
     let escaped = path.replace('\'', "''");
     StdCommand::new("powershell")
         .args([
@@ -16,6 +18,7 @@ fn play_sound_file(path: &str) {
             "-Command",
             &format!("(New-Object Media.SoundPlayer '{}').PlaySync()", escaped),
         ])
+        .creation_flags(CREATE_NO_WINDOW)
         .spawn()
         .ok();
 }

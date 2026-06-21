@@ -10,6 +10,7 @@ mod whisper;
 use db::Database;
 use std::sync::Arc;
 use tauri::Manager;
+use tauri_plugin_notification::NotificationExt;
 use whisper::WhisperEngine;
 
 fn get_app_data_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
@@ -36,19 +37,50 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .setup(|app| {
-            let app_data_dir = get_app_data_dir(&app.handle());
+            let app_handle = app.handle();
+            let app_data_dir = get_app_data_dir(&app_handle);
             let db = Database::new(app_data_dir.clone()).expect("Failed to initialize database");
             let db = Arc::new(db);
             app.manage(db.clone());
 
-            let whisper_engine = Arc::new(WhisperEngine::new());
+            // Copy default sound if not configured
+            if db.get_setting("notification_sound_path")
+                .unwrap_or(None)
+                .map_or(true, |p| p.is_empty())
+            {
+                let resource_path = app_handle.path().resource_dir()
+                    .ok()
+                    .map(|d| d.join("ritmo.wav"));
+                if let Some(src) = resource_path {
+                    if src.exists() {
+                        let dest = app_data_dir.join("ritmo.wav");
+                        let _ = std::fs::copy(&src, &dest);
+                        let _ = db.set_setting(
+                            "notification_sound_path",
+                            &dest.to_string_lossy(),
+                        );
+                    }
+                }
+            }
+
+            // Pre-request notification permission at startup
+            let _ = app_handle.notification().request_permission();
+
+            let default_model_variant = "small".to_string();
+            let whisper_engine = Arc::new(WhisperEngine::new(&app_data_dir, &default_model_variant));
             app.manage(whisper_engine);
 
-            tray::setup_tray(&app.handle());
-            shortcuts::register_all(&app.handle(), &db);
+            tray::setup_tray(&app_handle);
+            shortcuts::register_all(&app_handle, &db);
 
-            let handle = app.handle().clone();
+            let handle = app_handle.clone();
             scheduler::check_overdue_on_startup(&db, &handle);
             scheduler::start_scheduler(handle, db);
 
@@ -74,6 +106,7 @@ pub fn run() {
             commands::test_notification,
             commands::transcribe_audio,
             commands::get_model_status,
+            commands::get_model_info,
             commands::download_model,
             commands::refresh_shortcuts,
             commands::check_shortcut_conflict,

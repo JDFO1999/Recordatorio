@@ -1,17 +1,35 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useTranscription } from '../hooks/useTranscription';
 
 interface VoiceRecorderProps {
   onRecordingComplete: () => void;
+  autoStart?: boolean;
+  onAutoStartHandled?: () => void;
+  autoStop?: boolean;
+  onAutoStopHandled?: () => void;
 }
 
-export function VoiceRecorder({ onRecordingComplete }: VoiceRecorderProps) {
+export function VoiceRecorder({ onRecordingComplete, autoStart, onAutoStartHandled, autoStop, onAutoStopHandled }: VoiceRecorderProps) {
   const { transcriptionState, setTranscriptionState } = useAppStore();
   const [recording, setRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const { processAudioBlob } = useTranscription();
+
+  useEffect(() => {
+    if (autoStart && !recording && transcriptionState.status !== 'recording' && transcriptionState.status !== 'transcribing') {
+      startRecording();
+      onAutoStartHandled?.();
+    }
+  }, [autoStart]);
+
+  useEffect(() => {
+    if (autoStop && recording) {
+      stopRecording();
+      onAutoStopHandled?.();
+    }
+  }, [autoStop]);
 
   const startRecording = useCallback(async () => {
     try {

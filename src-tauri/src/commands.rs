@@ -2,7 +2,7 @@ use crate::date_parser;
 use crate::db::{AppSetting, Database, Reminder, Shortcut};
 use crate::notifications;
 use crate::shortcuts;
-use crate::whisper::{ModelStatus, WhisperEngine};
+use crate::whisper::{ModelInfo, ModelStatus, WhisperEngine};
 use std::sync::Arc;
 use tauri::AppHandle;
 use tauri::State;
@@ -197,11 +197,19 @@ pub fn test_notification(app: AppHandle, db: State<Arc<Database>>) -> Result<(),
 }
 
 #[tauri::command]
-pub fn transcribe_audio(
-    whisper: State<Arc<WhisperEngine>>,
+pub fn get_model_info(whisper: State<Arc<WhisperEngine>>) -> Result<ModelInfo, String> {
+    Ok(whisper.get_model_info())
+}
+
+#[tauri::command]
+pub async fn transcribe_audio(
+    whisper: State<'_, Arc<WhisperEngine>>,
     path: String,
 ) -> Result<String, String> {
-    whisper.transcribe(&path)
+    let engine = Arc::clone(&whisper);
+    tokio::task::spawn_blocking(move || engine.transcribe(&path))
+        .await
+        .map_err(|e| format!("Error en transcripción: {}", e))?
 }
 
 #[tauri::command]
@@ -210,8 +218,12 @@ pub fn get_model_status(whisper: State<Arc<WhisperEngine>>) -> Result<ModelStatu
 }
 
 #[tauri::command]
-pub fn download_model(whisper: State<Arc<WhisperEngine>>) -> Result<(), String> {
-    whisper.download_model()
+pub fn download_model(
+    whisper: State<Arc<WhisperEngine>>,
+    variant: Option<String>,
+) -> Result<(), String> {
+    let v = variant.as_deref().unwrap_or("small");
+    whisper.start_download(v)
 }
 
 #[tauri::command]

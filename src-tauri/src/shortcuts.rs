@@ -1,11 +1,12 @@
 use crate::db::Database;
+use std::sync::Arc;
 use tauri::AppHandle;
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{
     Code, GlobalShortcutExt, Modifiers, Shortcut as TauriShortcut, ShortcutState,
 };
 
-pub fn register_all(app: &AppHandle, db: &Database) {
+pub fn register_all(app: &AppHandle, db: &Arc<Database>) {
     let shortcuts = match db.get_all_shortcuts() {
         Ok(s) => s,
         Err(e) => {
@@ -18,7 +19,7 @@ pub fn register_all(app: &AppHandle, db: &Database) {
         if !sc.enabled {
             continue;
         }
-        match register_single_with_handler(app, &sc.action, &sc.accelerator, db) {
+        match register_single_with_handler(app, &sc.action, &sc.accelerator, Arc::clone(db)) {
             Ok(_) => {}
             Err(e) => {
                 eprintln!(
@@ -34,11 +35,10 @@ pub fn register_single_with_handler(
     app: &AppHandle,
     action: &str,
     accelerator: &str,
-    db: &Database,
+    db: Arc<Database>,
 ) -> Result<(), String> {
     let shortcut = parse_accelerator(accelerator)?;
     let action_owned = action.to_string();
-    let db_clone = unsafe { std::mem::transmute::<&Database, &'static Database>(db) };
 
     app.global_shortcut()
         .on_shortcut(shortcut, move |h, _s, event| {
@@ -70,10 +70,10 @@ pub fn register_single_with_handler(
                     }
                 }
                 "snooze_last" => {
-                    if let Ok(reminders) = db_clone.get_pending_reminders() {
+                    if let Ok(reminders) = db.get_pending_reminders() {
                         if let Some(last) = reminders.into_iter().last() {
-                            let _ = db_clone.snooze_reminder(&last.id, 5);
-                            let _ = db_clone.log_notification_event(
+                            let _ = db.snooze_reminder(&last.id, 5);
+                            let _ = db.log_notification_event(
                                 &last.id,
                                 "snoozed",
                                 Some(r#"{"source":"shortcut"}"#),
@@ -83,10 +83,10 @@ pub fn register_single_with_handler(
                     }
                 }
                 "complete_last" => {
-                    if let Ok(reminders) = db_clone.get_pending_reminders() {
+                    if let Ok(reminders) = db.get_pending_reminders() {
                         if let Some(last) = reminders.into_iter().last() {
-                            let _ = db_clone.update_reminder_status(&last.id, "completed");
-                            let _ = db_clone.log_notification_event(
+                            let _ = db.update_reminder_status(&last.id, "completed");
+                            let _ = db.log_notification_event(
                                 &last.id,
                                 "completed",
                                 Some(r#"{"source":"shortcut"}"#),

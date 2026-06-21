@@ -7,7 +7,8 @@ export function ConfirmReminder() {
   const { setCurrentView, pendingTranscriptionText, setPendingTranscriptionText } = useAppStore();
   const [parsed, setParsed] = useState<ParsedReminder | null>(null);
   const [title, setTitle] = useState('');
-  const [dueAt, setDueAt] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [dueTime, setDueTime] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -17,12 +18,14 @@ export function ConfirmReminder() {
       .then((result) => {
         setParsed(result);
         setTitle(result.title);
-        setDueAt(result.due_at);
+        setDueDate(result.due_at.slice(0, 10));
+        setDueTime(result.due_at.slice(11, 16));
       })
       .catch(() => {
         setTitle(pendingTranscriptionText);
         const future = new Date(Date.now() + 3600000);
-        setDueAt(future.toISOString().slice(0, 19));
+        setDueDate(future.toISOString().slice(0, 10));
+        setDueTime(future.toISOString().slice(11, 16));
       });
   }, [pendingTranscriptionText]);
 
@@ -31,6 +34,7 @@ export function ConfirmReminder() {
       setError('El título es obligatorio');
       return;
     }
+    const dueAt = `${dueDate}T${dueTime}:00`;
     setLoading(true);
     try {
       await createReminder(title.trim(), null, dueAt, 'voice');
@@ -102,16 +106,29 @@ export function ConfirmReminder() {
           />
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Fecha y hora
-          </label>
-          <input
-            type="datetime-local"
-            value={dueAt ? dueAt.slice(0, 16) : ''}
-            onChange={(e) => setDueAt(e.target.value + ':00')}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-          />
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Fecha
+            </label>
+            <input
+              type="date"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Hora
+            </label>
+            <input
+              type="time"
+              value={dueTime}
+              onChange={(e) => setDueTime(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+            />
+          </div>
         </div>
 
         {error && <p className="text-red-500 text-sm">{error}</p>}

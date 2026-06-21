@@ -17,7 +17,7 @@ pub fn start_scheduler(app: AppHandle, db: Arc<Database>) {
 
 fn get_scheduler_interval(db: &Database) -> u64 {
     match db.get_setting("scheduler_interval_secs") {
-        Ok(Some(val)) => val.parse::<u64>().unwrap_or(30),
+        Ok(Some(val)) => val.parse::<u64>().unwrap_or(30).max(10),
         _ => 30,
     }
 }
@@ -25,6 +25,13 @@ fn get_scheduler_interval(db: &Database) -> u64 {
 async fn check_and_notify(app: &AppHandle, db: &Database) {
     if let Ok(reminders) = db.get_pending_reminders() {
         let now = chrono::Local::now();
+        let notify_before_minutes = db
+            .get_setting("notify_before_minutes")
+            .unwrap_or(None)
+            .unwrap_or_else(|| "2".to_string())
+            .parse::<i64>()
+            .unwrap_or(2);
+
         for reminder in reminders {
             if reminder.status != "pending" {
                 continue;
@@ -32,7 +39,38 @@ async fn check_and_notify(app: &AppHandle, db: &Database) {
             if let Ok(due) =
                 chrono::NaiveDateTime::parse_from_str(&reminder.due_at, "%Y-%m-%dT%H:%M:%S")
             {
-                let due_local = due.and_local_timezone(chrono::Local).unwrap();
+                let due_local = due.and_local_timezone(chrono::Local).earliest().unwrap_or(chrono::Local::now());
+
+                let sound_path = db
+                    .get_setting("notification_sound_path")
+                    .unwrap_or(None)
+                    .unwrap_or_default();
+                let sound_path = if sound_path.is_empty() { None } else { Some(sound_path) };
+
+                // Pre-notification: within notify_before_minutes before due
+                let pre_window_start = due_local - chrono::Duration::minutes(notify_before_minutes);
+                if pre_window_start <= now && now < due_local {
+                    let already_pre_notified = db
+                        .get_notification_events_for_reminder(&reminder.id, "pre_notified")
+                        .unwrap_or(0)
+                        > 0;
+                    if !already_pre_notified {
+                        notifications::send_reminder_notification(
+                            app,
+                            &format!("⏰ {} - {} min", reminder.title, notify_before_minutes),
+                            &format!("Comienza en {} minuto{}", notify_before_minutes, if notify_before_minutes == 1 { "" } else { "s" }),
+                            &reminder.id,
+                            sound_path.as_deref(),
+                        );
+                        if let Err(e) =
+                            db.log_notification_event(&reminder.id, "pre_notified", None)
+                        {
+                            eprintln!("Failed to log pre-notification event: {}", e);
+                        }
+                    }
+                }
+
+                // Due notification: time has passed
                 if due_local <= now {
                     let already_notified = db
                         .get_notification_events_for_reminder(&reminder.id, "displayed")
@@ -42,11 +80,6 @@ async fn check_and_notify(app: &AppHandle, db: &Database) {
                         continue;
                     }
 
-                    let sound_path = db
-                        .get_setting("notification_sound_path")
-                        .unwrap_or(None)
-                        .unwrap_or_default();
-                    let sound_path = if sound_path.is_empty() { None } else { Some(sound_path) };
                     notifications::send_reminder_notification(
                         app,
                         &reminder.title,
@@ -78,7 +111,7 @@ pub fn check_overdue_on_startup(db: &Database, app: &AppHandle) {
             if let Ok(due) =
                 chrono::NaiveDateTime::parse_from_str(&reminder.due_at, "%Y-%m-%dT%H:%M:%S")
             {
-                let due_local = due.and_local_timezone(chrono::Local).unwrap();
+                let due_local = due.and_local_timezone(chrono::Local).earliest().unwrap_or(chrono::Local::now());
                 if due_local <= now {
                     if reminder.status == "notified" {
                         continue;

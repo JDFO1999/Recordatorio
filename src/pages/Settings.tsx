@@ -4,9 +4,10 @@ import { getSettings, setSetting, getShortcuts, updateShortcut, testNotification
 import { ShortcutEditor } from '../components/ShortcutEditor';
 import { ModelDownloader } from '../components/ModelDownloader';
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart';
+import { open } from '@tauri-apps/plugin-dialog';
 
 export function Settings() {
-  const { settings, setSettings, shortcuts, setShortcuts, setCurrentView, darkMode, setDarkMode } = useAppStore();
+  const { settings, setSettings, shortcuts, setShortcuts, setCurrentView, darkMode, setDarkMode, toggleTheme } = useAppStore();
   const [autostart, setAutostart] = useState(false);
 
   useEffect(() => {
@@ -85,15 +86,26 @@ export function Settings() {
     }
   };
 
-  const toggleDarkMode = () => {
-    const newMode = !darkMode;
-    setDarkMode(newMode);
-    localStorage.setItem('darkMode', String(newMode));
-    if (newMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
+  const browseSoundFile = async () => {
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: 'Audio WAV', extensions: ['wav'] }],
+      });
+      if (selected) {
+        await updateSetting('notification_sound_path', selected);
+      }
+    } catch {
+      // ignore
     }
+  };
+
+  const resetSoundToDefault = async () => {
+    await updateSetting('notification_sound_path', '');
+  };
+
+  const toggleDarkMode = () => {
+    toggleTheme();
   };
 
   return (
@@ -148,15 +160,27 @@ export function Settings() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-medium text-gray-700 dark:text-gray-300">Sonido de notificación</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Ruta del archivo .wav (vacío = predeterminado)</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Archivo .wav para el sonido de alerta</p>
               </div>
-              <input
-                type="text"
-                value={getSettingValue('notification_sound_path')}
-                onChange={(e) => updateSetting('notification_sound_path', e.target.value)}
-                placeholder="Ej: C:\sonidos\alerta.wav"
-                className="w-48 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-              />
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[120px]">
+                  {getSettingValue('notification_sound_path')
+                    ? getSettingValue('notification_sound_path').split('\\').pop()
+                    : 'Predeterminado (ritmo.wav)'}
+                </span>
+                <button
+                  onClick={browseSoundFile}
+                  className="px-2 py-1 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600 text-xs"
+                >
+                  Examinar
+                </button>
+                <button
+                  onClick={resetSoundToDefault}
+                  className="px-2 py-1 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600 text-xs"
+                >
+                  Default
+                </button>
+              </div>
             </div>
 
             <div className="flex items-center justify-between">
@@ -172,6 +196,26 @@ export function Settings() {
                 onChange={(e) => updateSetting('scheduler_interval_secs', e.target.value)}
                 className="w-20 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-center"
               />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium text-gray-700 dark:text-gray-300">Aviso anticipado</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Minutos antes para notificar</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min={0}
+                  max={30}
+                  value={getSettingValue('notify_before_minutes') || '2'}
+                  onChange={(e) => updateSetting('notify_before_minutes', e.target.value)}
+                  className="w-24"
+                />
+                <span className="text-sm font-mono text-gray-700 dark:text-gray-300 w-8 text-center">
+                  {getSettingValue('notify_before_minutes') || '2'}m
+                </span>
+              </div>
             </div>
 
             <div className="flex items-center justify-between">

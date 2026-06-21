@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Reminder, AppSetting, Shortcut, ViewType, TranscriptionState, ModelStatus } from '../types/reminder';
+import { setSetting } from '../services/settingsService';
 
 interface AppState {
   reminders: Reminder[];
@@ -10,6 +11,8 @@ interface AppState {
   isMinimized: boolean;
   modelStatus: ModelStatus;
   pendingTranscriptionText: string | null;
+  pendingRecording: boolean;
+  pendingStopRecording: boolean;
   darkMode: boolean;
   setReminders: (reminders: Reminder[]) => void;
   addReminder: (reminder: Reminder) => void;
@@ -22,7 +25,10 @@ interface AppState {
   setIsMinimized: (minimized: boolean) => void;
   setModelStatus: (status: ModelStatus) => void;
   setPendingTranscriptionText: (text: string | null) => void;
+  setPendingRecording: (pending: boolean) => void;
+  setPendingStopRecording: (pending: boolean) => void;
   setDarkMode: (dark: boolean) => void;
+  toggleTheme: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -34,6 +40,8 @@ export const useAppStore = create<AppState>((set) => ({
   isMinimized: false,
   modelStatus: 'NotDownloaded',
   pendingTranscriptionText: null,
+  pendingRecording: false,
+  pendingStopRecording: false,
   darkMode: false,
   setReminders: (reminders) => set({ reminders }),
   addReminder: (reminder) => set((state) => ({ reminders: [reminder, ...state.reminders] })),
@@ -49,5 +57,20 @@ export const useAppStore = create<AppState>((set) => ({
   setIsMinimized: (isMinimized) => set({ isMinimized }),
   setModelStatus: (modelStatus) => set({ modelStatus }),
   setPendingTranscriptionText: (pendingTranscriptionText) => set({ pendingTranscriptionText }),
+  setPendingRecording: (pendingRecording) => set({ pendingRecording }),
+  setPendingStopRecording: (pendingStopRecording) => set({ pendingStopRecording }),
   setDarkMode: (darkMode) => set({ darkMode }),
+  toggleTheme: () => {
+    set((state) => {
+      const newDark = !state.darkMode;
+      localStorage.setItem('darkMode', String(newDark));
+      if (newDark) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+      setSetting('theme', newDark ? 'dark' : 'light').catch(() => {});
+      return { darkMode: newDark };
+    });
+  },
 }));

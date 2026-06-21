@@ -5,7 +5,7 @@ interface LayoutProps {
 }
 
 export function Layout({ children }: LayoutProps) {
-  const { currentView, setCurrentView } = useAppStore();
+  const { currentView, setCurrentView, darkMode, toggleTheme } = useAppStore();
 
   const navItems = [
     { id: 'dashboard' as const, label: 'Inicio', icon: '🏠' },
@@ -15,6 +15,18 @@ export function Layout({ children }: LayoutProps) {
 
   return (
     <div className="h-screen flex flex-col bg-gray-50 dark:bg-gray-900">
+      <header className="relative flex items-center justify-center h-12 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shrink-0">
+        <h1 className="text-base font-semibold text-gray-700 dark:text-gray-300 select-none">
+          Recordatorio
+        </h1>
+        <button
+          onClick={toggleTheme}
+          className="absolute left-3 w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          title={darkMode ? 'Modo claro' : 'Modo oscuro'}
+        >
+          <span className="text-base">{darkMode ? '☀️' : '🌙'}</span>
+        </button>
+      </header>
       <main className="flex-1 overflow-y-auto">
         {children}
       </main>
