@@ -1,2 +1,4 @@
 [target.x86_64-pc-windows-gnu]
-linker = "gcc-lld.cmd"
+# libgcc references __mingwthr_key_dtor which is in libmingw32
+# This ensures libmingw32 is searched after libgcc
+rustflags = ["-C", "link-args=-lmingw32"]

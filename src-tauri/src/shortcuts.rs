@@ -70,30 +70,38 @@ pub fn register_single_with_handler(
                     }
                 }
                 "snooze_last" => {
-                    if let Ok(reminders) = db.get_pending_reminders() {
-                        if let Some(last) = reminders.into_iter().last() {
-                            let _ = db.snooze_reminder(&last.id, 5);
-                            let _ = db.log_notification_event(
-                                &last.id,
-                                "snoozed",
-                                Some(r#"{"source":"shortcut"}"#),
-                            );
-                            let _ = h.emit("global-shortcut:snoozed", last.id);
+                    let db = db.clone();
+                    let h = h.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Ok(reminders) = db.get_pending_reminders().await {
+                            if let Some(last) = reminders.into_iter().last() {
+                                let _ = db.snooze_reminder(&last.id, 5).await;
+                                let _ = db.log_notification_event(
+                                    &last.id,
+                                    "snoozed",
+                                    Some(r#"{"source":"shortcut"}"#),
+                                );
+                                let _ = h.emit("global-shortcut:snoozed", last.id);
+                            }
                         }
-                    }
+                    });
                 }
                 "complete_last" => {
-                    if let Ok(reminders) = db.get_pending_reminders() {
-                        if let Some(last) = reminders.into_iter().last() {
-                            let _ = db.update_reminder_status(&last.id, "completed");
-                            let _ = db.log_notification_event(
-                                &last.id,
-                                "completed",
-                                Some(r#"{"source":"shortcut"}"#),
-                            );
-                            let _ = h.emit("global-shortcut:completed", last.id);
+                    let db = db.clone();
+                    let h = h.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Ok(reminders) = db.get_pending_reminders().await {
+                            if let Some(last) = reminders.into_iter().last() {
+                                let _ = db.update_reminder_status(&last.id, "completed").await;
+                                let _ = db.log_notification_event(
+                                    &last.id,
+                                    "completed",
+                                    Some(r#"{"source":"shortcut"}"#),
+                                );
+                                let _ = h.emit("global-shortcut:completed", last.id);
+                            }
                         }
-                    }
+                    });
                 }
                 _ => {}
             }

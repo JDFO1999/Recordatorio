@@ -13,6 +13,7 @@ interface AppState {
   pendingTranscriptionText: string | null;
   pendingRecording: boolean;
   pendingStopRecording: boolean;
+  editingReminder: Reminder | null;
   darkMode: boolean;
   setReminders: (reminders: Reminder[]) => void;
   addReminder: (reminder: Reminder) => void;
@@ -26,6 +27,7 @@ interface AppState {
   setModelStatus: (status: ModelStatus) => void;
   setPendingTranscriptionText: (text: string | null) => void;
   setPendingRecording: (pending: boolean) => void;
+  setEditingReminder: (reminder: Reminder | null) => void;
   setPendingStopRecording: (pending: boolean) => void;
   setDarkMode: (dark: boolean) => void;
   toggleTheme: () => void;
@@ -42,6 +44,7 @@ export const useAppStore = create<AppState>((set) => ({
   pendingTranscriptionText: null,
   pendingRecording: false,
   pendingStopRecording: false,
+  editingReminder: null,
   darkMode: false,
   setReminders: (reminders) => set({ reminders }),
   addReminder: (reminder) => set((state) => ({ reminders: [reminder, ...state.reminders] })),
@@ -58,6 +61,7 @@ export const useAppStore = create<AppState>((set) => ({
   setModelStatus: (modelStatus) => set({ modelStatus }),
   setPendingTranscriptionText: (pendingTranscriptionText) => set({ pendingTranscriptionText }),
   setPendingRecording: (pendingRecording) => set({ pendingRecording }),
+  setEditingReminder: (editingReminder) => set({ editingReminder }),
   setPendingStopRecording: (pendingStopRecording) => set({ pendingStopRecording }),
   setDarkMode: (darkMode) => set({ darkMode }),
   toggleTheme: () => {

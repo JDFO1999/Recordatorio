@@ -66,8 +66,8 @@ export function Dashboard() {
     }
   };
 
-  const handleEdit = (_reminder: ReminderType) => {
-    useAppStore.getState().setPendingTranscriptionText(null);
+  const handleEdit = (reminder: ReminderType) => {
+    useAppStore.getState().setEditingReminder(reminder);
     setCurrentView('create');
   };
 

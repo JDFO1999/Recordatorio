@@ -5,6 +5,8 @@ import { ShortcutEditor } from '../components/ShortcutEditor';
 import { ModelDownloader } from '../components/ModelDownloader';
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { open } from '@tauri-apps/plugin-dialog';
+import { check } from '@tauri-apps/plugin-updater';
+import { relaunch } from '@tauri-apps/plugin-process';
 
 export function Settings() {
   const { settings, setSettings, shortcuts, setShortcuts, setCurrentView, darkMode, setDarkMode, toggleTheme } = useAppStore();
@@ -102,6 +104,40 @@ export function Settings() {
 
   const resetSoundToDefault = async () => {
     await updateSetting('notification_sound_path', '');
+  };
+
+  const [testing, setTesting] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<string | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+
+  const handleCheckUpdate = async () => {
+    setCheckingUpdate(true);
+    setUpdateStatus(null);
+    try {
+      const update = await check();
+      if (update) {
+        setUpdateStatus(`Actualización ${update.version} disponible — instalando...`);
+        await update.downloadAndInstall();
+        await relaunch();
+      } else {
+        setUpdateStatus('Ya tienes la última versión');
+      }
+    } catch (e) {
+      setUpdateStatus(`Error al buscar: ${e}`);
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
+  const handleTestNotification = async () => {
+    setTesting(true);
+    try {
+      await testNotification();
+    } catch {
+      // ignore
+    } finally {
+      setTesting(false);
+    }
   };
 
   const toggleDarkMode = () => {
@@ -224,10 +260,11 @@ export function Settings() {
                 <p className="text-xs text-gray-500 dark:text-gray-400">Envía una notificación de prueba</p>
               </div>
               <button
-                onClick={() => testNotification()}
-                className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                onClick={handleTestNotification}
+                disabled={testing}
+                className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Probar
+                {testing ? 'Reproduciendo...' : 'Probar'}
               </button>
             </div>
           </div>
@@ -253,6 +290,28 @@ export function Settings() {
                 onToggle={handleShortcutToggle}
               />
             ))}
+          </div>
+        </section>
+
+        {/* Actualizaciones */}
+        <section className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+          <h2 className="text-lg font-semibold text-gray-800 dark:text-white mb-4">Actualizaciones</h2>
+          <div className="space-y-3">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Busca e instala la última versión desde GitHub
+            </p>
+            <button
+              onClick={handleCheckUpdate}
+              disabled={checkingUpdate}
+              className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm disabled:opacity-50"
+            >
+              {checkingUpdate ? 'Buscando...' : 'Buscar actualizaciones'}
+            </button>
+            {updateStatus && (
+              <p className={`text-sm ${updateStatus.includes('Error') ? 'text-red-500' : 'text-green-600 dark:text-green-400'}`}>
+                {updateStatus}
+              </p>
+            )}
           </div>
         </section>
 

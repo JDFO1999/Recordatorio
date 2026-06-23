@@ -31,6 +31,11 @@ export function ReminderCard({ reminder, onComplete, onCancel, onDelete, onEdit 
             {reminder.source === 'voice' && (
               <span className="text-xs text-blue-500">🎤</span>
             )}
+            {reminder.created_by && (
+              <span className="text-xs px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded">
+                {reminder.created_by}
+              </span>
+            )}
           </div>
           {reminder.description && (
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">{reminder.description}</p>

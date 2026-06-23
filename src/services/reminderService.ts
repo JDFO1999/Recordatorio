@@ -1,8 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { Reminder, ParsedReminder } from '../types/reminder';
 
-export async function createReminder(title: string, description: string | null, dueAt: string, source?: string): Promise<Reminder> {
-  return invoke('create_reminder', { title, description, dueAt, source });
+export async function createReminder(title: string, description: string | null, dueAt: string, source?: string, repeatIntervalSeconds?: number | null): Promise<Reminder> {
+  return invoke('create_reminder', { title, description, dueAt, source, repeatIntervalSeconds });
 }
 
 export async function createReminderFromVoice(text: string): Promise<Reminder> {

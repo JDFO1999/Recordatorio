@@ -23,7 +23,7 @@ fn get_scheduler_interval(db: &Database) -> u64 {
 }
 
 async fn check_and_notify(app: &AppHandle, db: &Database) {
-    if let Ok(reminders) = db.get_pending_reminders() {
+    if let Ok(reminders) = db.get_pending_reminders().await {
         let now = chrono::Local::now();
         let notify_before_minutes = db
             .get_setting("notify_before_minutes")
@@ -87,13 +87,24 @@ async fn check_and_notify(app: &AppHandle, db: &Database) {
                         &reminder.id,
                         sound_path.as_deref(),
                     );
-                    if let Err(e) = db.update_reminder_status(&reminder.id, "notified") {
-                        eprintln!("Failed to update reminder status: {}", e);
-                    }
                     if let Err(e) =
                         db.log_notification_event(&reminder.id, "displayed", None)
                     {
                         eprintln!("Failed to log notification event: {}", e);
+                    }
+                    if let Some(interval) = reminder.repeat_interval_seconds {
+                        if interval > 0 {
+                            let new_due = chrono::Local::now() + chrono::Duration::seconds(interval);
+                            let new_due_str = new_due.format("%Y-%m-%dT%H:%M:%S").to_string();
+                            if let Err(e) = db.reschedule_repeating(&reminder.id, &new_due_str).await {
+                                eprintln!("Failed to reschedule repeating reminder: {}", e);
+                            }
+                            let _ = db.clear_notification_events(&reminder.id);
+                        }
+                    } else {
+                        if let Err(e) = db.update_reminder_status(&reminder.id, "notified").await {
+                            eprintln!("Failed to update reminder status: {}", e);
+                        }
                     }
                 }
             }
@@ -101,8 +112,8 @@ async fn check_and_notify(app: &AppHandle, db: &Database) {
     }
 }
 
-pub fn check_overdue_on_startup(db: &Database, app: &AppHandle) {
-    if let Ok(reminders) = db.get_pending_reminders() {
+pub async fn check_overdue_on_startup(db: &Database, app: &AppHandle) {
+    if let Ok(reminders) = db.get_pending_reminders().await {
         let now = chrono::Local::now();
         for reminder in reminders {
             if reminder.status != "pending" {
@@ -131,7 +142,7 @@ pub fn check_overdue_on_startup(db: &Database, app: &AppHandle) {
                         &reminder.id,
                         sound_path.as_deref(),
                     );
-                    if let Err(e) = db.update_reminder_status(&reminder.id, "notified") {
+                    if let Err(e) = db.update_reminder_status(&reminder.id, "notified").await {
                         eprintln!("Failed to update reminder status: {}", e);
                     }
                 }

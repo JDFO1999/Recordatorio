@@ -9,6 +9,7 @@ pub struct ParsedReminder {
     pub due_at: String,
     pub confidence: f64,
     pub parsed_time_expression: Option<String>,
+    pub repeat_interval_seconds: Option<i64>,
 }
 
 pub fn parse_reminder_text(text: &str) -> ParsedReminder {
@@ -25,6 +26,7 @@ pub fn parse_reminder_text(text: &str) -> ParsedReminder {
         .trim()
         .to_string();
 
+    let repeat_interval = extract_repeat_interval(&cleaned);
     let due_at = parse_datetime(&cleaned, now);
     let title = extract_title(&cleaned, &due_at.expression);
 
@@ -34,6 +36,7 @@ pub fn parse_reminder_text(text: &str) -> ParsedReminder {
         due_at: due_at.datetime.format("%Y-%m-%dT%H:%M:%S").to_string(),
         confidence: due_at.confidence,
         parsed_time_expression: due_at.expression.clone(),
+        repeat_interval_seconds: repeat_interval,
     }
 }
 
@@ -243,6 +246,26 @@ fn extract_time_from_text(text: &str) -> Option<NaiveTime> {
         let hour: u32 = caps[1].parse().ok()?;
         let minute: u32 = caps[2].parse().ok()?;
         return NaiveTime::from_hms_opt(hour.min(23), minute.min(59), 0);
+    }
+    None
+}
+
+fn extract_repeat_interval(text: &str) -> Option<i64> {
+    let lowercase = text.to_lowercase();
+    let re = Regex::new(r"cada\s+(\d+)?\s*(minutos?|min|horas?|hrs?|días?|dias?|hora)").ok()?;
+    if let Some(caps) = re.captures(&lowercase) {
+        let unit = caps.get(2)?.as_str();
+        let is_minute = matches!(unit, "minuto" | "minutos" | "min");
+        let is_hour = matches!(unit, "hora" | "horas" | "hrs" | "hr");
+        let is_day = matches!(unit, "día" | "días" | "dia" | "dias");
+        let count: i64 = match caps.get(1) {
+            Some(m) => m.as_str().parse().ok()?,
+            None => 1,
+        };
+        return Some(if is_minute { count * 60 }
+            else if is_hour { count * 3600 }
+            else if is_day { count * 86400 }
+            else { count * 3600 });
     }
     None
 }

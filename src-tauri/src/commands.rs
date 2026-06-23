@@ -8,14 +8,16 @@ use tauri::AppHandle;
 use tauri::State;
 
 #[tauri::command]
-pub fn create_reminder(
-    db: State<Arc<Database>>,
+pub async fn create_reminder(
+    db: State<'_, Arc<Database>>,
     title: String,
     description: Option<String>,
     due_at: String,
     source: Option<String>,
+    repeat_interval_seconds: Option<i64>,
 ) -> Result<Reminder, String> {
     let now = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+    let device = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "unknown".to_string());
     let reminder = Reminder {
         id: uuid::Uuid::new_v4().to_string(),
         title,
@@ -32,18 +34,21 @@ pub fn create_reminder(
         last_snoozed_at: None,
         parsed_time_expression: None,
         source: source.unwrap_or_else(|| "manual".to_string()),
+        repeat_interval_seconds,
+        created_by: Some(device),
     };
-    db.create_reminder(&reminder).map_err(|e| e.to_string())?;
+    db.create_reminder(&reminder).await?;
     Ok(reminder)
 }
 
 #[tauri::command]
-pub fn create_reminder_from_voice(
-    db: State<Arc<Database>>,
+pub async fn create_reminder_from_voice(
+    db: State<'_, Arc<Database>>,
     text: String,
 ) -> Result<Reminder, String> {
     let parsed = date_parser::parse_reminder_text(&text);
     let now = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+    let device = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "unknown".to_string());
     let reminder = Reminder {
         id: uuid::Uuid::new_v4().to_string(),
         title: parsed.title,
@@ -60,85 +65,91 @@ pub fn create_reminder_from_voice(
         last_snoozed_at: None,
         parsed_time_expression: parsed.parsed_time_expression,
         source: "voice".to_string(),
+        repeat_interval_seconds: parsed.repeat_interval_seconds,
+        created_by: Some(device),
     };
-    db.create_reminder(&reminder).map_err(|e| e.to_string())?;
+    db.create_reminder(&reminder).await?;
     Ok(reminder)
 }
 
 #[tauri::command]
-pub fn get_pending_reminders(db: State<Arc<Database>>) -> Result<Vec<Reminder>, String> {
-    db.get_pending_reminders().map_err(|e| e.to_string())
+pub async fn get_pending_reminders(db: State<'_, Arc<Database>>) -> Result<Vec<Reminder>, String> {
+    db.get_pending_reminders().await
 }
 
 #[tauri::command]
-pub fn get_pending_reminders_count(db: State<Arc<Database>>) -> Result<usize, String> {
-    let reminders = db.get_pending_reminders().map_err(|e| e.to_string())?;
+pub async fn get_pending_reminders_count(
+    db: State<'_, Arc<Database>>,
+) -> Result<usize, String> {
+    let reminders = db.get_pending_reminders().await?;
     Ok(reminders.len())
 }
 
 #[tauri::command]
-pub fn get_all_reminders(
-    db: State<Arc<Database>>,
+pub async fn get_all_reminders(
+    db: State<'_, Arc<Database>>,
     status_filter: Option<String>,
 ) -> Result<Vec<Reminder>, String> {
-    db.get_all_reminders(status_filter.as_deref())
-        .map_err(|e| e.to_string())
+    db.get_all_reminders(status_filter.as_deref()).await
 }
 
 #[tauri::command]
-pub fn get_reminder_by_id(
-    db: State<Arc<Database>>,
+pub async fn get_reminder_by_id(
+    db: State<'_, Arc<Database>>,
     id: String,
 ) -> Result<Option<Reminder>, String> {
-    db.get_reminder_by_id(&id).map_err(|e| e.to_string())
+    db.get_reminder_by_id(&id).await
 }
 
 #[tauri::command]
-pub fn update_reminder(
-    db: State<Arc<Database>>,
+pub async fn update_reminder(
+    db: State<'_, Arc<Database>>,
     id: String,
     title: String,
     description: Option<String>,
     due_at: String,
 ) -> Result<(), String> {
-    db.update_reminder(&id, &title, description.as_deref(), &due_at)
-        .map_err(|e| e.to_string())
+    db.update_reminder(&id, &title, description.as_deref(), &due_at).await
 }
 
 #[tauri::command]
-pub fn mark_completed(db: State<Arc<Database>>, id: String) -> Result<(), String> {
-    db.update_reminder_status(&id, "completed")
-        .map_err(|e| e.to_string())?;
+pub async fn mark_completed(
+    db: State<'_, Arc<Database>>,
+    id: String,
+) -> Result<(), String> {
+    db.update_reminder_status(&id, "completed").await?;
     db.log_notification_event(&id, "completed", None)
-        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn mark_cancelled(db: State<Arc<Database>>, id: String) -> Result<(), String> {
-    db.update_reminder_status(&id, "cancelled")
-        .map_err(|e| e.to_string())?;
+pub async fn mark_cancelled(
+    db: State<'_, Arc<Database>>,
+    id: String,
+) -> Result<(), String> {
+    db.update_reminder_status(&id, "cancelled").await?;
     db.log_notification_event(&id, "cancelled", None)
-        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn snooze_reminder(
-    db: State<Arc<Database>>,
+pub async fn snooze_reminder(
+    db: State<'_, Arc<Database>>,
     id: String,
     minutes: i32,
 ) -> Result<(), String> {
-    db.snooze_reminder(&id, minutes).map_err(|e| e.to_string())?;
+    db.snooze_reminder(&id, minutes).await?;
     db.log_notification_event(
         &id,
         "snoozed",
         Some(&format!("{{\"minutes\":{}}}", minutes)),
     )
-    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn delete_reminder(db: State<Arc<Database>>, id: String) -> Result<(), String> {
-    db.delete_reminder(&id).map_err(|e| e.to_string())
+pub async fn delete_reminder(
+    db: State<'_, Arc<Database>>,
+    id: String,
+) -> Result<(), String> {
+    db.delete_reminder(&id).await
 }
 
 #[tauri::command]
@@ -148,22 +159,22 @@ pub fn parse_text(text: String) -> Result<date_parser::ParsedReminder, String> {
 
 #[tauri::command]
 pub fn get_settings(db: State<Arc<Database>>) -> Result<Vec<AppSetting>, String> {
-    db.get_all_settings().map_err(|e| e.to_string())
+    db.get_all_settings()
 }
 
 #[tauri::command]
 pub fn get_setting(db: State<Arc<Database>>, key: String) -> Result<Option<String>, String> {
-    db.get_setting(&key).map_err(|e| e.to_string())
+    db.get_setting(&key)
 }
 
 #[tauri::command]
 pub fn set_setting(db: State<Arc<Database>>, key: String, value: String) -> Result<(), String> {
-    db.set_setting(&key, &value).map_err(|e| e.to_string())
+    db.set_setting(&key, &value)
 }
 
 #[tauri::command]
 pub fn get_shortcuts(db: State<Arc<Database>>) -> Result<Vec<Shortcut>, String> {
-    db.get_all_shortcuts().map_err(|e| e.to_string())
+    db.get_all_shortcuts()
 }
 
 #[tauri::command]
@@ -174,8 +185,7 @@ pub fn update_shortcut(
     accelerator: String,
     enabled: bool,
 ) -> Result<(), String> {
-    db.update_shortcut(&id, &accelerator, enabled)
-        .map_err(|e| e.to_string())?;
+    db.update_shortcut(&id, &accelerator, enabled)?;
     shortcuts::unregister_all(&app);
     shortcuts::register_all(&app, &db);
     Ok(())
@@ -192,7 +202,7 @@ pub fn test_notification(app: AppHandle, db: State<Arc<Database>>) -> Result<(),
     } else {
         Some(sound_path)
     };
-    notifications::send_test_notification(&app, sound_path.as_deref());
+    notifications::send_test_notification(&app, sound_path.as_deref(), true);
     Ok(())
 }
 
@@ -243,24 +253,26 @@ pub fn check_shortcut_conflict(accelerator: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub fn snooze_last_reminder(db: State<Arc<Database>>, minutes: i32) -> Result<(), String> {
-    if let Ok(reminders) = db.get_pending_reminders() {
+pub async fn snooze_last_reminder(
+    db: State<'_, Arc<Database>>,
+    minutes: i32,
+) -> Result<(), String> {
+    if let Ok(reminders) = db.get_pending_reminders().await {
         if let Some(last) = reminders.into_iter().last() {
-            return db.snooze_reminder(&last.id, minutes).map_err(|e| e.to_string());
+            return db.snooze_reminder(&last.id, minutes).await;
         }
     }
     Err("No hay recordatorios pendientes".to_string())
 }
 
 #[tauri::command]
-pub fn complete_last_reminder(db: State<Arc<Database>>) -> Result<(), String> {
-    if let Ok(reminders) = db.get_pending_reminders() {
+pub async fn complete_last_reminder(
+    db: State<'_, Arc<Database>>,
+) -> Result<(), String> {
+    if let Ok(reminders) = db.get_pending_reminders().await {
         if let Some(last) = reminders.into_iter().last() {
-            db.update_reminder_status(&last.id, "completed")
-                .map_err(|e| e.to_string())?;
-            return db
-                .log_notification_event(&last.id, "completed", None)
-                .map_err(|e| e.to_string());
+            db.update_reminder_status(&last.id, "completed").await?;
+            return db.log_notification_event(&last.id, "completed", None);
         }
     }
     Err("No hay recordatorios pendientes".to_string())

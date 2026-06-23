@@ -26,6 +26,8 @@ export interface Reminder {
   last_snoozed_at: string | null;
   parsed_time_expression: string | null;
   source: string;
+  repeat_interval_seconds: number | null;
+  created_by: string | null;
 }
 
 export interface ParsedReminder {
@@ -34,6 +36,7 @@ export interface ParsedReminder {
   due_at: string;
   confidence: number;
   parsed_time_expression: string | null;
+  repeat_interval_seconds: number | null;
 }
 
 export interface AppSetting {

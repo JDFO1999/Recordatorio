@@ -41,7 +41,19 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "../ritmo.wav"
+      "../ritmo.wav",
+      "target/release/libstdc++-6.dll",
+      "target/release/WebView2Loader.dll"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "dialog": true,
+      "endpoints": [
+        "https://github.com/JDFO1999/Recordatorio/releases/latest/download/update.json"
+      ],
+      "pubkey": ""
+    }
   }
 }

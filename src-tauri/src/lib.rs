@@ -19,6 +19,26 @@ fn get_app_data_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
         .expect("Failed to get app data directory")
 }
 
+const DEFAULT_DB_URL: &str = "Server=tcp:10.10.70.160,1433;Database=Systemas;User=SA;Password=Alkosto123;TrustServerCertificate=true";
+
+fn load_connection_string(app_dir: &std::path::Path) -> Option<String> {
+    if let Ok(val) = std::env::var("RECORDATORIO_DB_URL") {
+        if !val.is_empty() {
+            return Some(val);
+        }
+    }
+    let env_path = app_dir.join(".env");
+    if env_path.exists() {
+        dotenvy::from_path(&env_path).ok();
+        if let Ok(val) = std::env::var("RECORDATORIO_DB_URL") {
+            if !val.is_empty() {
+                return Some(val);
+            }
+        }
+    }
+    Some(DEFAULT_DB_URL.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -31,6 +51,8 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
@@ -46,7 +68,14 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle();
             let app_data_dir = get_app_data_dir(&app_handle);
-            let db = Database::new(app_data_dir.clone()).expect("Failed to initialize database");
+            let conn_string = load_connection_string(&app_data_dir);
+            if conn_string.is_some() {
+                println!("SQL Server configurado (modo compartido)");
+            } else {
+                println!("Sin SQL Server (modo local)");
+            }
+            let db = Database::new(app_data_dir.clone(), conn_string)
+                .expect("Failed to initialize database");
             let db = Arc::new(db);
             app.manage(db.clone());
 
@@ -81,8 +110,12 @@ pub fn run() {
             shortcuts::register_all(&app_handle, &db);
 
             let handle = app_handle.clone();
-            scheduler::check_overdue_on_startup(&db, &handle);
-            scheduler::start_scheduler(handle, db);
+            let handle2 = handle.clone();
+            let db_clone = db.clone();
+            tauri::async_runtime::spawn(async move {
+                scheduler::check_overdue_on_startup(&db_clone, &handle).await;
+            });
+            scheduler::start_scheduler(handle2, db);
 
             Ok(())
         })

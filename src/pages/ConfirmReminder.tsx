@@ -9,6 +9,7 @@ export function ConfirmReminder() {
   const [title, setTitle] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [dueTime, setDueTime] = useState('');
+  const [repeatInterval, setRepeatInterval] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -20,6 +21,7 @@ export function ConfirmReminder() {
         setTitle(result.title);
         setDueDate(result.due_at.slice(0, 10));
         setDueTime(result.due_at.slice(11, 16));
+        setRepeatInterval(result.repeat_interval_seconds ?? null);
       })
       .catch(() => {
         setTitle(pendingTranscriptionText);
@@ -37,7 +39,7 @@ export function ConfirmReminder() {
     const dueAt = `${dueDate}T${dueTime}:00`;
     setLoading(true);
     try {
-      await createReminder(title.trim(), null, dueAt, 'voice');
+      await createReminder(title.trim(), null, dueAt, 'voice', repeatInterval);
       setPendingTranscriptionText(null);
       setCurrentView('dashboard');
     } catch (e) {
@@ -130,6 +132,16 @@ export function ConfirmReminder() {
             />
           </div>
         </div>
+
+        {repeatInterval && (
+          <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm text-blue-700 dark:text-blue-300">
+            Se repetirá cada {repeatInterval < 3600
+              ? `${repeatInterval / 60} minutos`
+              : repeatInterval < 86400
+              ? `${repeatInterval / 3600} horas`
+              : `${repeatInterval / 86400} día(s)`}
+          </div>
+        )}
 
         {error && <p className="text-red-500 text-sm">{error}</p>}
 
