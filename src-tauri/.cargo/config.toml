@@ -1,4 +1,5 @@
 [target.x86_64-pc-windows-gnu]
 # libgcc references __mingwthr_key_dtor which is in libmingw32
 # This ensures libmingw32 is searched after libgcc
+# libstdc++-6.dll and WebView2Loader.dll are bundled via bundle.resources + build.rs
 rustflags = ["-C", "link-args=-lmingw32"]

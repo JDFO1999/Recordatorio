@@ -28,3 +28,11 @@ export async function refreshShortcuts(): Promise<void> {
 export async function testNotification(): Promise<void> {
   return invoke('test_notification');
 }
+
+export async function getDbMode(): Promise<string> {
+  return invoke('get_db_mode');
+}
+
+export async function setDbMode(mode: string): Promise<void> {
+  return invoke('set_db_mode', { mode });
+}

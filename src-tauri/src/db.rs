@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use tiberius::{Client, Config, Query};
+use tiberius::{Client, Config, EncryptionLevel, Query};
 use tokio::net::TcpStream;
 use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
 
@@ -61,25 +61,12 @@ pub struct NotificationEvent {
 pub struct Database {
     conn: Mutex<Connection>,
     remote_config: Option<Config>,
-    remote_db_name: String,
     remote_ensured: AtomicBool,
+    use_remote: AtomicBool,
 }
 
 fn device_name() -> String {
     std::env::var("COMPUTERNAME").unwrap_or_else(|_| "unknown".to_string())
-}
-
-fn extract_db_name(s: &str) -> String {
-    for part in s.split(';') {
-        let t = part.trim();
-        if let Some(v) = t.to_lowercase().strip_prefix("database=") {
-            return v.to_string();
-        }
-        if let Some(v) = t.to_lowercase().strip_prefix("initial catalog=") {
-            return v.to_string();
-        }
-    }
-    "master".to_string()
 }
 
 impl Database {
@@ -88,20 +75,29 @@ impl Database {
         let db_path = app_dir.join("recordatorio.db");
         let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
 
-        let (remote_config, remote_db_name) = match conn_string {
-            Some(ref s) => (Config::from_ado_string(s).ok(), extract_db_name(s)),
-            None => (None, String::new()),
+        let remote_config = match conn_string {
+            Some(ref s) => Config::from_ado_string(s).ok().map(|mut c| {
+                c.encryption(EncryptionLevel::NotSupported);
+                c
+            }),
+            None => None,
         };
 
         let db = Database {
             conn: Mutex::new(conn),
             remote_config,
-            remote_db_name,
             remote_ensured: AtomicBool::new(false),
+            use_remote: AtomicBool::new(false),
         };
         db.initialize_local_tables().map_err(|e| e.to_string())?;
         db.insert_default_settings().map_err(|e| e.to_string())?;
         db.insert_default_shortcuts().map_err(|e| e.to_string())?;
+        // Load persisted db_mode
+        if let Ok(Some(mode)) = db.get_setting("db_mode") {
+            if mode == "compartido" && db.remote_config.is_some() {
+                db.use_remote.store(true, Ordering::Relaxed);
+            }
+        }
         Ok(db)
     }
 
@@ -173,6 +169,7 @@ impl Database {
             ("notify_before_minutes", "2"),
             ("theme", "light"),
             ("transcription_provider", "whisper"),
+            ("db_mode", "local"),
         ];
         for (key, value) in defaults {
             conn.execute(
@@ -282,7 +279,7 @@ impl Database {
 
     pub async fn create_reminder(&self, reminder: &Reminder) -> Result<(), String> {
         let device = device_name();
-        if self.remote_config.is_some() {
+        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.is_some() {
             let mut client = self.get_remote_client().await?;
             let mut q = Query::new(
                 "INSERT INTO reminders (id, title, description, original_text, due_at, status, created_at, updated_at, snooze_count, source, parsed_time_expression, repeat_interval_seconds, created_by)
@@ -319,7 +316,7 @@ impl Database {
     }
 
     pub async fn get_pending_reminders(&self) -> Result<Vec<Reminder>, String> {
-        if self.remote_config.is_some() {
+        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.is_some() {
             let mut client = self.get_remote_client().await?;
             let mut query = Query::new(
                 "SELECT id, title, description, original_text, due_at, status, created_at, updated_at,
@@ -371,7 +368,7 @@ impl Database {
     }
 
     pub async fn get_all_reminders(&self, status_filter: Option<&str>) -> Result<Vec<Reminder>, String> {
-        if self.remote_config.is_some() {
+        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.is_some() {
             let mut client = self.get_remote_client().await?;
             let sql = match status_filter {
                 Some(_) => "SELECT id, title, description, original_text, due_at, status, created_at, updated_at,
@@ -441,7 +438,7 @@ impl Database {
     }
 
     pub async fn get_reminder_by_id(&self, id: &str) -> Result<Option<Reminder>, String> {
-        if self.remote_config.is_some() {
+        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.is_some() {
             let mut client = self.get_remote_client().await?;
             let mut query = Query::new(
                 "SELECT id, title, description, original_text, due_at, status, created_at, updated_at,
@@ -494,7 +491,7 @@ impl Database {
 
     pub async fn update_reminder(&self, id: &str, title: &str, description: Option<&str>, due_at: &str) -> Result<(), String> {
         let now = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
-        if self.remote_config.is_some() {
+        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.is_some() {
             let mut client = self.get_remote_client().await?;
             let mut q = Query::new("UPDATE reminders SET title = @P1, description = @P2, due_at = @P3, updated_at = @P4 WHERE id = @P5");
             q.bind(title);
@@ -521,7 +518,7 @@ impl Database {
             "cancelled" => ("cancelled_at", Some(now.clone())),
             _ => ("updated_at", None),
         };
-        if self.remote_config.is_some() {
+        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.is_some() {
             let mut client = self.get_remote_client().await?;
             match status_val {
                 Some(val) => {
@@ -566,7 +563,7 @@ impl Database {
         let new_due = now + chrono::Duration::minutes(snooze_minutes as i64);
         let new_due_str = new_due.format("%Y-%m-%dT%H:%M:%S").to_string();
         let now_str = now.format("%Y-%m-%dT%H:%M:%S").to_string();
-        if self.remote_config.is_some() {
+        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.is_some() {
             let mut client = self.get_remote_client().await?;
             let mut q = Query::new(
                 "UPDATE reminders SET status = @P1, due_at = @P2, snooze_count = snooze_count + 1, last_snoozed_at = @P3, updated_at = @P3 WHERE id = @P4"
@@ -589,7 +586,7 @@ impl Database {
 
     pub async fn reschedule_repeating(&self, id: &str, new_due_at: &str) -> Result<(), String> {
         let now = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
-        if self.remote_config.is_some() {
+        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.is_some() {
             let mut client = self.get_remote_client().await?;
             let mut q = Query::new("UPDATE reminders SET due_at = @P1, updated_at = @P2, status = @P3 WHERE id = @P4");
             q.bind(new_due_at);
@@ -608,7 +605,7 @@ impl Database {
     }
 
     pub async fn delete_reminder(&self, id: &str) -> Result<(), String> {
-        if self.remote_config.is_some() {
+        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.is_some() {
             let mut client = self.get_remote_client().await?;
             client.simple_query(&format!("DELETE FROM reminders WHERE id = '{}'", id))
                 .await.map_err(|e| format!("Error eliminando: {}", e))?;
@@ -616,6 +613,34 @@ impl Database {
             let conn = self.conn.lock().unwrap();
             conn.execute("DELETE FROM notification_events WHERE reminder_id = ?1", params![id]).map_err(|e| e.to_string())?;
             conn.execute("DELETE FROM reminders WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    // --- DB mode toggle ---
+
+    pub fn get_db_mode(&self) -> String {
+        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.is_some() {
+            "compartido".to_string()
+        } else {
+            "local".to_string()
+        }
+    }
+
+    pub fn set_db_mode(&self, mode: &str) -> Result<(), String> {
+        match mode {
+            "local" => {
+                self.use_remote.store(false, Ordering::Relaxed);
+                self.set_setting("db_mode", "local")?;
+            }
+            "compartido" => {
+                if self.remote_config.is_none() {
+                    return Err("No hay configuración de SQL Server disponible".to_string());
+                }
+                self.use_remote.store(true, Ordering::Relaxed);
+                self.set_setting("db_mode", "compartido")?;
+            }
+            _ => return Err(format!("Modo inválido: {}", mode)),
         }
         Ok(())
     }

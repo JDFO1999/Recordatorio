@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAppStore } from '../store/appStore';
-import { getSettings, setSetting, getShortcuts, updateShortcut, testNotification } from '../services/settingsService';
+import { getSettings, setSetting, getShortcuts, updateShortcut, testNotification, getDbMode, setDbMode } from '../services/settingsService';
 import { ShortcutEditor } from '../components/ShortcutEditor';
 import { ModelDownloader } from '../components/ModelDownloader';
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart';
@@ -15,6 +15,7 @@ export function Settings() {
   useEffect(() => {
     loadSettings();
     checkAutostart();
+    loadDbMode();
     const savedDark = localStorage.getItem('darkMode') === 'true';
     if (savedDark !== darkMode) {
       setDarkMode(savedDark);
@@ -109,6 +110,8 @@ export function Settings() {
   const [testing, setTesting] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [dbMode, setDbModeState] = useState('local');
+  const [togglingDb, setTogglingDb] = useState(false);
 
   const handleCheckUpdate = async () => {
     setCheckingUpdate(true);
@@ -137,6 +140,28 @@ export function Settings() {
       // ignore
     } finally {
       setTesting(false);
+    }
+  };
+
+  const loadDbMode = async () => {
+    try {
+      const mode = await getDbMode();
+      setDbModeState(mode);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleToggleDb = async () => {
+    setTogglingDb(true);
+    try {
+      const newMode = dbMode === 'local' ? 'compartido' : 'local';
+      await setDbMode(newMode);
+      setDbModeState(newMode);
+    } catch (e) {
+      alert(`Error al cambiar modo: ${e}`);
+    } finally {
+      setTogglingDb(false);
     }
   };
 
@@ -265,6 +290,32 @@ export function Settings() {
                 className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {testing ? 'Reproduciendo...' : 'Probar'}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {/* Base de datos */}
+        <section className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+          <h2 className="text-lg font-semibold text-gray-800 dark:text-white mb-4">Base de datos</h2>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium text-gray-700 dark:text-gray-300">
+                  Modo actual: <span className={dbMode === 'compartido' ? 'text-green-600' : 'text-blue-600'}>{dbMode === 'compartido' ? 'Compartido (Sistemas)' : 'Local (solo este PC)'}</span>
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {dbMode === 'compartido'
+                    ? 'Los recordatorios se guardan en SQL Server y son visibles para ambos PCs'
+                    : 'Los recordatorios se guardan solo en este equipo (SQLite)'}
+                </p>
+              </div>
+              <button
+                onClick={handleToggleDb}
+                disabled={togglingDb}
+                className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm disabled:opacity-50"
+              >
+                {togglingDb ? 'Cambiando...' : dbMode === 'local' ? 'Cambiar a Compartido' : 'Cambiar a Local'}
               </button>
             </div>
           </div>

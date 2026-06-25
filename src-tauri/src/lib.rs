@@ -19,7 +19,7 @@ fn get_app_data_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
         .expect("Failed to get app data directory")
 }
 
-const DEFAULT_DB_URL: &str = "Server=tcp:10.10.70.160,1433;Database=Systemas;User=SA;Password=Alkosto123;TrustServerCertificate=true";
+const DEFAULT_DB_URL: &str = "Server=tcp:10.10.70.160,1433;Database=Sistemas;User=SA;Password=Alkosto123;TrustServerCertificate=true";
 
 fn load_connection_string(app_dir: &std::path::Path) -> Option<String> {
     if let Ok(val) = std::env::var("RECORDATORIO_DB_URL") {
@@ -148,6 +148,8 @@ pub fn run() {
             commands::complete_last_reminder,
             commands::save_file,
             commands::delete_file,
+            commands::get_db_mode,
+            commands::set_db_mode,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

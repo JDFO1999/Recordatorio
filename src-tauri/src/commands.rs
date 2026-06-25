@@ -279,6 +279,16 @@ pub async fn complete_last_reminder(
 }
 
 #[tauri::command]
+pub fn get_db_mode(db: State<'_, Arc<Database>>) -> String {
+    db.get_db_mode()
+}
+
+#[tauri::command]
+pub fn set_db_mode(db: State<'_, Arc<Database>>, mode: String) -> Result<(), String> {
+    db.set_db_mode(&mode)
+}
+
+#[tauri::command]
 pub fn save_file(path: String, data: Vec<u8>) -> Result<(), String> {
     use std::io::Write;
     let parent = std::path::Path::new(&path)
