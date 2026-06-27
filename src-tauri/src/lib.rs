@@ -19,26 +19,6 @@ fn get_app_data_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
         .expect("Failed to get app data directory")
 }
 
-const DEFAULT_DB_URL: &str = "Server=tcp:10.10.70.160,1433;Database=Sistemas;User=SA;Password=Alkosto123;TrustServerCertificate=true";
-
-fn load_connection_string(app_dir: &std::path::Path) -> Option<String> {
-    if let Ok(val) = std::env::var("RECORDATORIO_DB_URL") {
-        if !val.is_empty() {
-            return Some(val);
-        }
-    }
-    let env_path = app_dir.join(".env");
-    if env_path.exists() {
-        dotenvy::from_path(&env_path).ok();
-        if let Ok(val) = std::env::var("RECORDATORIO_DB_URL") {
-            if !val.is_empty() {
-                return Some(val);
-            }
-        }
-    }
-    Some(DEFAULT_DB_URL.to_string())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -68,13 +48,7 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle();
             let app_data_dir = get_app_data_dir(&app_handle);
-            let conn_string = load_connection_string(&app_data_dir);
-            if conn_string.is_some() {
-                println!("SQL Server configurado (modo compartido)");
-            } else {
-                println!("Sin SQL Server (modo local)");
-            }
-            let db = Database::new(app_data_dir.clone(), conn_string)
+            let db = Database::new(app_data_dir.clone())
                 .expect("Failed to initialize database");
             let db = Arc::new(db);
             app.manage(db.clone());
@@ -150,6 +124,9 @@ pub fn run() {
             commands::delete_file,
             commands::get_db_mode,
             commands::set_db_mode,
+            commands::get_sql_server_config,
+            commands::test_sql_server_connection,
+            commands::save_sql_server_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

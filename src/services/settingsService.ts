@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { AppSetting, Shortcut } from '../types/reminder';
+import type { AppSetting, Shortcut, SqlServerConfig } from '../types/reminder';
 
 export async function getSettings(): Promise<AppSetting[]> {
   return invoke('get_settings');
@@ -35,4 +35,16 @@ export async function getDbMode(): Promise<string> {
 
 export async function setDbMode(mode: string): Promise<void> {
   return invoke('set_db_mode', { mode });
+}
+
+export async function getSqlServerConfig(): Promise<SqlServerConfig> {
+  return invoke('get_sql_server_config');
+}
+
+export async function testSqlServerConnection(config: SqlServerConfig): Promise<string> {
+  return invoke('test_sql_server_connection', { config });
+}
+
+export async function saveSqlServerConfig(config: SqlServerConfig): Promise<string> {
+  return invoke('save_sql_server_config', { config });
 }

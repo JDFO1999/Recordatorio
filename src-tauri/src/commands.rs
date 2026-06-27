@@ -1,5 +1,5 @@
 use crate::date_parser;
-use crate::db::{AppSetting, Database, Reminder, Shortcut};
+use crate::db::{AppSetting, Database, Reminder, Shortcut, SqlServerConfig};
 use crate::notifications;
 use crate::shortcuts;
 use crate::whisper::{ModelInfo, ModelStatus, WhisperEngine};
@@ -308,4 +308,28 @@ pub fn delete_file(path: String) -> Result<(), String> {
         std::fs::remove_file(&path).map_err(|e| format!("Failed to delete file: {}", e))?;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn get_sql_server_config(db: State<Arc<Database>>) -> Result<SqlServerConfig, String> {
+    Ok(db.get_sql_server_config())
+}
+
+#[tauri::command]
+pub async fn test_sql_server_connection(config: SqlServerConfig) -> Result<String, String> {
+    Database::test_sql_server_connection(&config).await
+}
+
+#[tauri::command]
+pub async fn save_sql_server_config(
+    db: State<'_, Arc<Database>>,
+    config: SqlServerConfig,
+) -> Result<String, String> {
+    // First test the connection
+    let result = Database::test_sql_server_connection(&config).await?;
+    // If successful, save the config
+    db.update_sql_server_config(&config)?;
+    // Update db_mode to use remote
+    db.set_db_mode("compartido")?;
+    Ok(result)
 }

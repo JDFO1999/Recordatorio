@@ -58,6 +58,29 @@ pub struct NotificationEvent {
     pub metadata: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SqlServerConfig {
+    pub host: String,
+    pub port: u16,
+    pub database: String,
+    pub user: String,
+    pub password: String,
+    pub trust_certificate: bool,
+}
+
+impl Default for SqlServerConfig {
+    fn default() -> Self {
+        SqlServerConfig {
+            host: String::new(),
+            port: 1433,
+            database: String::new(),
+            user: String::new(),
+            password: String::new(),
+            trust_certificate: true,
+        }
+    }
+}
+
 pub struct Database {
     conn: Mutex<Connection>,
     remote_config: Option<Config>,
@@ -70,28 +93,22 @@ fn device_name() -> String {
 }
 
 impl Database {
-    pub fn new(app_dir: PathBuf, conn_string: Option<String>) -> Result<Self, String> {
+    pub fn new(app_dir: PathBuf) -> Result<Self, String> {
         std::fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
         let db_path = app_dir.join("recordatorio.db");
         let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
 
-        let remote_config = match conn_string {
-            Some(ref s) => Config::from_ado_string(s).ok().map(|mut c| {
-                c.encryption(EncryptionLevel::NotSupported);
-                c
-            }),
-            None => None,
-        };
-
         let db = Database {
             conn: Mutex::new(conn),
-            remote_config,
+            remote_config: None,
             remote_ensured: AtomicBool::new(false),
             use_remote: AtomicBool::new(false),
         };
         db.initialize_local_tables().map_err(|e| e.to_string())?;
         db.insert_default_settings().map_err(|e| e.to_string())?;
         db.insert_default_shortcuts().map_err(|e| e.to_string())?;
+        // Load remote config from saved settings
+        db.build_remote_config_from_settings();
         // Load persisted db_mode
         if let Ok(Some(mode)) = db.get_setting("db_mode") {
             if mode == "compartido" && db.remote_config.is_some() {
@@ -170,6 +187,12 @@ impl Database {
             ("theme", "light"),
             ("transcription_provider", "whisper"),
             ("db_mode", "local"),
+            ("sql_server_host", ""),
+            ("sql_server_port", "1433"),
+            ("sql_server_database", ""),
+            ("sql_server_user", ""),
+            ("sql_server_password", ""),
+            ("sql_server_trust_certificate", "true"),
         ];
         for (key, value) in defaults {
             conn.execute(
@@ -643,6 +666,103 @@ impl Database {
             _ => return Err(format!("Modo inválido: {}", mode)),
         }
         Ok(())
+    }
+
+    // --- SQL Server config (from settings) ---
+
+    fn build_remote_config_from_settings(&self) {
+        let host = self.get_setting("sql_server_host").ok().flatten().unwrap_or_default();
+        let port = self.get_setting("sql_server_port").ok().flatten().unwrap_or_else(|| "1433".to_string());
+        let database = self.get_setting("sql_server_database").ok().flatten().unwrap_or_default();
+        let user = self.get_setting("sql_server_user").ok().flatten().unwrap_or_default();
+        let password = self.get_setting("sql_server_password").ok().flatten().unwrap_or_default();
+        let trust = self.get_setting("sql_server_trust_certificate").ok().flatten().unwrap_or_else(|| "true".to_string());
+
+        if host.is_empty() || database.is_empty() {
+            self.remote_config = None;
+            return;
+        }
+
+        let conn_string = format!(
+            "Server=tcp:{},{};Database={};User={};Password={};TrustServerCertificate={}",
+            host, port, database, user, password, trust
+        );
+
+        self.remote_config = Config::from_ado_string(&conn_string).ok().map(|mut c| {
+            c.encryption(EncryptionLevel::NotSupported);
+            c
+        });
+    }
+
+    pub fn get_sql_server_config(&self) -> SqlServerConfig {
+        SqlServerConfig {
+            host: self.get_setting("sql_server_host").ok().flatten().unwrap_or_default(),
+            port: self.get_setting("sql_server_port").ok().flatten().unwrap_or_else(|| "1433".to_string()).parse().unwrap_or(1433),
+            database: self.get_setting("sql_server_database").ok().flatten().unwrap_or_default(),
+            user: self.get_setting("sql_server_user").ok().flatten().unwrap_or_default(),
+            password: self.get_setting("sql_server_password").ok().flatten().unwrap_or_default(),
+            trust_certificate: self.get_setting("sql_server_trust_certificate").ok().flatten().unwrap_or_else(|| "true".to_string()) == "true",
+        }
+    }
+
+    pub fn update_sql_server_config(&self, config: &SqlServerConfig) -> Result<(), String> {
+        self.set_setting("sql_server_host", &config.host)?;
+        self.set_setting("sql_server_port", &config.port.to_string())?;
+        self.set_setting("sql_server_database", &config.database)?;
+        self.set_setting("sql_server_user", &config.user)?;
+        self.set_setting("sql_server_password", &config.password)?;
+        self.set_setting("sql_server_trust_certificate", if config.trust_certificate { "true" } else { "false" })?;
+        self.build_remote_config_from_settings();
+        Ok(())
+    }
+
+    pub async fn test_sql_server_connection(config: &SqlServerConfig) -> Result<String, String> {
+        let conn_string = format!(
+            "Server=tcp:{},{};Database={};User={};Password={};TrustServerCertificate={}",
+            config.host, config.port, config.database, config.user, config.password,
+            if config.trust_certificate { "true" } else { "false" }
+        );
+
+        let tcp_config = Config::from_ado_string(&conn_string)
+            .map_err(|e| format!("Error en la cadena de conexión: {}", e))?;
+
+        let addr = tcp_config.get_addr();
+        let tcp = TcpStream::connect(addr.as_str()).await
+            .map_err(|e| format!("No se pudo conectar a {}: {}", addr, e))?;
+        tcp.set_nodelay(true).map_err(|e| format!("Error en socket: {}", e))?;
+
+        let mut client = Client::connect(tcp_config, tcp.compat_write()).await
+            .map_err(|e| format!("Error de autenticación: {}", e))?;
+
+        // Ensure remote tables exist
+        let create_sql = format!(
+            "IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'reminders')
+             BEGIN
+                 CREATE TABLE reminders (
+                     id NVARCHAR(36) PRIMARY KEY,
+                     title NVARCHAR(500) NOT NULL,
+                     description NVARCHAR(MAX),
+                     original_text NVARCHAR(MAX),
+                     due_at NVARCHAR(30) NOT NULL,
+                     status NVARCHAR(20) NOT NULL DEFAULT 'pending',
+                     created_at NVARCHAR(30) NOT NULL,
+                     updated_at NVARCHAR(30) NOT NULL,
+                     notified_at NVARCHAR(30),
+                     completed_at NVARCHAR(30),
+                     cancelled_at NVARCHAR(30),
+                     snooze_count INT DEFAULT 0,
+                     last_snoozed_at NVARCHAR(30),
+                     parsed_time_expression NVARCHAR(200),
+                     source NVARCHAR(20) DEFAULT 'voice',
+                     repeat_interval_seconds BIGINT,
+                     created_by NVARCHAR(100) NOT NULL
+                 );
+             END"
+        );
+        client.simple_query(&create_sql).await
+            .map_err(|e| format!("Error creando tabla reminders: {}", e))?;
+
+        Ok(format!("Conectado a SQL Server en {}:{}, base de datos '{}'. Tabla 'reminders' lista.", config.host, config.port, config.database))
     }
 
     // --- Settings (always local) ---

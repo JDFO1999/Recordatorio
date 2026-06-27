@@ -66,3 +66,12 @@ export interface TranscriptionState {
   status: 'idle' | 'recording' | 'transcribing' | 'done' | 'error';
   error?: string;
 }
+
+export interface SqlServerConfig {
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  password: string;
+  trust_certificate: boolean;
+}

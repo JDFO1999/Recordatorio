@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAppStore } from '../store/appStore';
-import { getSettings, setSetting, getShortcuts, updateShortcut, testNotification, getDbMode, setDbMode } from '../services/settingsService';
+import { getSettings, setSetting, getShortcuts, updateShortcut, testNotification, getDbMode, setDbMode, getSqlServerConfig, testSqlServerConnection, saveSqlServerConfig } from '../services/settingsService';
+import type { SqlServerConfig } from '../types/reminder';
 import { ShortcutEditor } from '../components/ShortcutEditor';
 import { ModelDownloader } from '../components/ModelDownloader';
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart';
@@ -16,6 +17,7 @@ export function Settings() {
     loadSettings();
     checkAutostart();
     loadDbMode();
+    loadSqlConfig();
     const savedDark = localStorage.getItem('darkMode') === 'true';
     if (savedDark !== darkMode) {
       setDarkMode(savedDark);
@@ -112,6 +114,10 @@ export function Settings() {
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [dbMode, setDbModeState] = useState('local');
   const [togglingDb, setTogglingDb] = useState(false);
+  const [sqlConfig, setSqlConfig] = useState<SqlServerConfig>({ host: '', port: 1433, database: '', user: '', password: '', trust_certificate: true });
+  const [sqlStatus, setSqlStatus] = useState<string | null>(null);
+  const [testingConn, setTestingConn] = useState(false);
+  const [savingConn, setSavingConn] = useState(false);
 
   const handleCheckUpdate = async () => {
     setCheckingUpdate(true);
@@ -162,6 +168,42 @@ export function Settings() {
       alert(`Error al cambiar modo: ${e}`);
     } finally {
       setTogglingDb(false);
+    }
+  };
+
+  const loadSqlConfig = async () => {
+    try {
+      const config = await getSqlServerConfig();
+      setSqlConfig(config);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleTestConnection = async () => {
+    setTestingConn(true);
+    setSqlStatus(null);
+    try {
+      const result = await testSqlServerConnection(sqlConfig);
+      setSqlStatus(result);
+    } catch (e) {
+      setSqlStatus(`Error: ${e}`);
+    } finally {
+      setTestingConn(false);
+    }
+  };
+
+  const handleSaveConnection = async () => {
+    setSavingConn(true);
+    setSqlStatus(null);
+    try {
+      const result = await saveSqlServerConfig(sqlConfig);
+      setSqlStatus(result);
+      setDbModeState('compartido');
+    } catch (e) {
+      setSqlStatus(`Error: ${e}`);
+    } finally {
+      setSavingConn(false);
     }
   };
 
@@ -298,24 +340,113 @@ export function Settings() {
         {/* Base de datos */}
         <section className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
           <h2 className="text-lg font-semibold text-gray-800 dark:text-white mb-4">Base de datos</h2>
+
+          {/* Modo actual */}
+          <div className="flex items-center justify-between mb-4 pb-4 border-b border-gray-200 dark:border-gray-700">
+            <div>
+              <p className="font-medium text-gray-700 dark:text-gray-300">
+                Modo actual: <span className={dbMode === 'compartido' ? 'text-green-600' : 'text-blue-600'}>{dbMode === 'compartido' ? 'Compartido (SQL Server)' : 'Local (solo este PC)'}</span>
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {dbMode === 'compartido'
+                  ? 'Los recordatorios se guardan en SQL Server y son visibles para todos los PCs conectados'
+                  : 'Los recordatorios se guardan solo en este equipo (SQLite)'}
+              </p>
+            </div>
+            <button
+              onClick={handleToggleDb}
+              disabled={togglingDb}
+              className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm disabled:opacity-50"
+            >
+              {togglingDb ? 'Cambiando...' : dbMode === 'local' ? 'Cambiar a Compartido' : 'Cambiar a Local'}
+            </button>
+          </div>
+
+          {/* Configuración SQL Server */}
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
+            <h3 className="font-medium text-gray-700 dark:text-gray-300 text-sm">Conexión SQL Server</h3>
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <p className="font-medium text-gray-700 dark:text-gray-300">
-                  Modo actual: <span className={dbMode === 'compartido' ? 'text-green-600' : 'text-blue-600'}>{dbMode === 'compartido' ? 'Compartido (Sistemas)' : 'Local (solo este PC)'}</span>
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  {dbMode === 'compartido'
-                    ? 'Los recordatorios se guardan en SQL Server y son visibles para ambos PCs'
-                    : 'Los recordatorios se guardan solo en este equipo (SQLite)'}
-                </p>
+                <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Host</label>
+                <input
+                  type="text"
+                  value={sqlConfig.host}
+                  onChange={(e) => setSqlConfig({ ...sqlConfig, host: e.target.value })}
+                  placeholder="ej: 192.168.1.100"
+                  className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
               </div>
+              <div>
+                <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Puerto</label>
+                <input
+                  type="number"
+                  value={sqlConfig.port}
+                  onChange={(e) => setSqlConfig({ ...sqlConfig, port: parseInt(e.target.value) || 1433 })}
+                  placeholder="1433"
+                  className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Base de datos</label>
+                <input
+                  type="text"
+                  value={sqlConfig.database}
+                  onChange={(e) => setSqlConfig({ ...sqlConfig, database: e.target.value })}
+                  placeholder="ej: Recordatorios"
+                  className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Usuario</label>
+                <input
+                  type="text"
+                  value={sqlConfig.user}
+                  onChange={(e) => setSqlConfig({ ...sqlConfig, user: e.target.value })}
+                  placeholder="ej: sa"
+                  className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Contraseña</label>
+                <input
+                  type="text"
+                  value={sqlConfig.password}
+                  onChange={(e) => setSqlConfig({ ...sqlConfig, password: e.target.value })}
+                  placeholder="Contraseña"
+                  className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={sqlConfig.trust_certificate}
+                  onChange={(e) => setSqlConfig({ ...sqlConfig, trust_certificate: e.target.checked })}
+                  className="rounded border-gray-300"
+                />
+                TrustServerCertificate
+              </label>
+            </div>
+            {sqlStatus && (
+              <p className={`text-sm ${sqlStatus.includes('Error') || sqlStatus.includes('error') || sqlStatus.includes('No se pudo') ? 'text-red-500' : 'text-green-600 dark:text-green-400'}`}>
+                {sqlStatus}
+              </p>
+            )}
+            <div className="flex gap-2">
               <button
-                onClick={handleToggleDb}
-                disabled={togglingDb}
-                className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm disabled:opacity-50"
+                onClick={handleTestConnection}
+                disabled={testingConn}
+                className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600 text-sm disabled:opacity-50"
               >
-                {togglingDb ? 'Cambiando...' : dbMode === 'local' ? 'Cambiar a Compartido' : 'Cambiar a Local'}
+                {testingConn ? 'Probando...' : 'Probar conexión'}
+              </button>
+              <button
+                onClick={handleSaveConnection}
+                disabled={savingConn}
+                className="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm disabled:opacity-50"
+              >
+                {savingConn ? 'Guardando...' : 'Guardar y usar'}
               </button>
             </div>
           </div>
