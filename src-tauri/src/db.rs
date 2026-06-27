@@ -83,7 +83,7 @@ impl Default for SqlServerConfig {
 
 pub struct Database {
     conn: Mutex<Connection>,
-    remote_config: Option<Config>,
+    remote_config: Mutex<Option<Config>>,
     remote_ensured: AtomicBool,
     use_remote: AtomicBool,
 }
@@ -100,7 +100,7 @@ impl Database {
 
         let db = Database {
             conn: Mutex::new(conn),
-            remote_config: None,
+            remote_config: Mutex::new(None),
             remote_ensured: AtomicBool::new(false),
             use_remote: AtomicBool::new(false),
         };
@@ -108,10 +108,10 @@ impl Database {
         db.insert_default_settings().map_err(|e| e.to_string())?;
         db.insert_default_shortcuts().map_err(|e| e.to_string())?;
         // Load remote config from saved settings
-        db.build_remote_config_from_settings();
+        *db.remote_config.lock().unwrap() = db.build_remote_config_from_settings();
         // Load persisted db_mode
         if let Ok(Some(mode)) = db.get_setting("db_mode") {
-            if mode == "compartido" && db.remote_config.is_some() {
+            if mode == "compartido" && db.remote_config.lock().unwrap().is_some() {
                 db.use_remote.store(true, Ordering::Relaxed);
             }
         }
@@ -230,16 +230,19 @@ impl Database {
             self.ensure_remote_tables().await?;
             self.remote_ensured.store(true, Ordering::Relaxed);
         }
-        let config = self.remote_config.as_ref().ok_or_else(|| "SQL Server no configurado".to_string())?;
+        let config = self.remote_config.lock().unwrap().clone()
+            .ok_or_else(|| "SQL Server no configurado".to_string())?;
         let addr = config.get_addr();
         let tcp = TcpStream::connect(addr.as_str()).await.map_err(|e| format!("No se pudo conectar a SQL Server ({}): {}", addr, e))?;
         tcp.set_nodelay(true).map_err(|e| format!("Error en socket: {}", e))?;
-        Client::connect(config.clone(), tcp.compat_write()).await.map_err(|e| format!("Error de autenticación con SQL Server: {}", e))
+        Client::connect(config, tcp.compat_write()).await.map_err(|e| format!("Error de autenticación con SQL Server: {}", e))
     }
 
     async fn ensure_remote_tables(&self) -> Result<(), String> {
-        if self.remote_config.is_none() { return Ok(()); }
-        let config = self.remote_config.as_ref().unwrap();
+        let config = match self.remote_config.lock().unwrap().as_ref() {
+            Some(c) => c.clone(),
+            None => return Ok(()),
+        };
 
         let tcp = TcpStream::connect(config.get_addr().as_str()).await
             .map_err(|e| format!("No se pudo conectar a SQL Server ({}): {}", config.get_addr(), e))?;
@@ -302,7 +305,7 @@ impl Database {
 
     pub async fn create_reminder(&self, reminder: &Reminder) -> Result<(), String> {
         let device = device_name();
-        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.is_some() {
+        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.lock().unwrap().is_some() {
             let mut client = self.get_remote_client().await?;
             let mut q = Query::new(
                 "INSERT INTO reminders (id, title, description, original_text, due_at, status, created_at, updated_at, snooze_count, source, parsed_time_expression, repeat_interval_seconds, created_by)
@@ -339,7 +342,7 @@ impl Database {
     }
 
     pub async fn get_pending_reminders(&self) -> Result<Vec<Reminder>, String> {
-        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.is_some() {
+        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.lock().unwrap().is_some() {
             let mut client = self.get_remote_client().await?;
             let mut query = Query::new(
                 "SELECT id, title, description, original_text, due_at, status, created_at, updated_at,
@@ -391,7 +394,7 @@ impl Database {
     }
 
     pub async fn get_all_reminders(&self, status_filter: Option<&str>) -> Result<Vec<Reminder>, String> {
-        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.is_some() {
+        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.lock().unwrap().is_some() {
             let mut client = self.get_remote_client().await?;
             let sql = match status_filter {
                 Some(_) => "SELECT id, title, description, original_text, due_at, status, created_at, updated_at,
@@ -461,7 +464,7 @@ impl Database {
     }
 
     pub async fn get_reminder_by_id(&self, id: &str) -> Result<Option<Reminder>, String> {
-        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.is_some() {
+        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.lock().unwrap().is_some() {
             let mut client = self.get_remote_client().await?;
             let mut query = Query::new(
                 "SELECT id, title, description, original_text, due_at, status, created_at, updated_at,
@@ -514,7 +517,7 @@ impl Database {
 
     pub async fn update_reminder(&self, id: &str, title: &str, description: Option<&str>, due_at: &str) -> Result<(), String> {
         let now = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
-        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.is_some() {
+        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.lock().unwrap().is_some() {
             let mut client = self.get_remote_client().await?;
             let mut q = Query::new("UPDATE reminders SET title = @P1, description = @P2, due_at = @P3, updated_at = @P4 WHERE id = @P5");
             q.bind(title);
@@ -541,7 +544,7 @@ impl Database {
             "cancelled" => ("cancelled_at", Some(now.clone())),
             _ => ("updated_at", None),
         };
-        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.is_some() {
+        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.lock().unwrap().is_some() {
             let mut client = self.get_remote_client().await?;
             match status_val {
                 Some(val) => {
@@ -586,7 +589,7 @@ impl Database {
         let new_due = now + chrono::Duration::minutes(snooze_minutes as i64);
         let new_due_str = new_due.format("%Y-%m-%dT%H:%M:%S").to_string();
         let now_str = now.format("%Y-%m-%dT%H:%M:%S").to_string();
-        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.is_some() {
+        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.lock().unwrap().is_some() {
             let mut client = self.get_remote_client().await?;
             let mut q = Query::new(
                 "UPDATE reminders SET status = @P1, due_at = @P2, snooze_count = snooze_count + 1, last_snoozed_at = @P3, updated_at = @P3 WHERE id = @P4"
@@ -609,7 +612,7 @@ impl Database {
 
     pub async fn reschedule_repeating(&self, id: &str, new_due_at: &str) -> Result<(), String> {
         let now = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
-        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.is_some() {
+        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.lock().unwrap().is_some() {
             let mut client = self.get_remote_client().await?;
             let mut q = Query::new("UPDATE reminders SET due_at = @P1, updated_at = @P2, status = @P3 WHERE id = @P4");
             q.bind(new_due_at);
@@ -628,7 +631,7 @@ impl Database {
     }
 
     pub async fn delete_reminder(&self, id: &str) -> Result<(), String> {
-        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.is_some() {
+        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.lock().unwrap().is_some() {
             let mut client = self.get_remote_client().await?;
             client.simple_query(&format!("DELETE FROM reminders WHERE id = '{}'", id))
                 .await.map_err(|e| format!("Error eliminando: {}", e))?;
@@ -643,7 +646,7 @@ impl Database {
     // --- DB mode toggle ---
 
     pub fn get_db_mode(&self) -> String {
-        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.is_some() {
+        if self.use_remote.load(Ordering::Relaxed) && self.remote_config.lock().unwrap().is_some() {
             "compartido".to_string()
         } else {
             "local".to_string()
@@ -657,7 +660,7 @@ impl Database {
                 self.set_setting("db_mode", "local")?;
             }
             "compartido" => {
-                if self.remote_config.is_none() {
+                if self.remote_config.lock().unwrap().is_none() {
                     return Err("No hay configuración de SQL Server disponible".to_string());
                 }
                 self.use_remote.store(true, Ordering::Relaxed);
@@ -670,7 +673,7 @@ impl Database {
 
     // --- SQL Server config (from settings) ---
 
-    fn build_remote_config_from_settings(&self) {
+    fn build_remote_config_from_settings(&self) -> Option<Config> {
         let host = self.get_setting("sql_server_host").ok().flatten().unwrap_or_default();
         let port = self.get_setting("sql_server_port").ok().flatten().unwrap_or_else(|| "1433".to_string());
         let database = self.get_setting("sql_server_database").ok().flatten().unwrap_or_default();
@@ -679,8 +682,7 @@ impl Database {
         let trust = self.get_setting("sql_server_trust_certificate").ok().flatten().unwrap_or_else(|| "true".to_string());
 
         if host.is_empty() || database.is_empty() {
-            self.remote_config = None;
-            return;
+            return None;
         }
 
         let conn_string = format!(
@@ -688,10 +690,10 @@ impl Database {
             host, port, database, user, password, trust
         );
 
-        self.remote_config = Config::from_ado_string(&conn_string).ok().map(|mut c| {
+        Config::from_ado_string(&conn_string).ok().map(|mut c| {
             c.encryption(EncryptionLevel::NotSupported);
             c
-        });
+        })
     }
 
     pub fn get_sql_server_config(&self) -> SqlServerConfig {
@@ -712,7 +714,7 @@ impl Database {
         self.set_setting("sql_server_user", &config.user)?;
         self.set_setting("sql_server_password", &config.password)?;
         self.set_setting("sql_server_trust_certificate", if config.trust_certificate { "true" } else { "false" })?;
-        self.build_remote_config_from_settings();
+        *self.remote_config.lock().unwrap() = self.build_remote_config_from_settings();
         Ok(())
     }
 
